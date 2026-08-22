@@ -95,3 +95,9 @@ Lessons from running this on a real deployment — recommended companion setting
 - **YAML comments are not preserved**: auto-completion parses and rewrites the
   settings document with the `yaml` package, which drops comments. Keep
   operational notes elsewhere.
+- **Switching a long conversation to a much-smaller model can fail once**:
+  until auto-completion lands, an undeclared entry rides the schema-default
+  context window (262k), so compaction under-trims and the upstream may reject
+  the first message with `CONTEXT_WINDOW_EXCEEDED` when its real window is far
+  smaller. The metadata is persisted during that same request; retrying on the
+  model compacts correctly. Brand-new conversations never hit this.
