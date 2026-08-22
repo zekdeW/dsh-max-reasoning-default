@@ -10,10 +10,15 @@ future adapter implementing the standard `resolveModel` capability seam.
 | Situation | Result |
 | --- | --- |
 | No effort chosen for the request | Set to the model's top tier (e.g. `max`) |
-| Effort explicitly picked in the composer | Respected, untouched |
+| Effort equal to the adapter-reported default (picker auto-attachment) | Also raised — keeps future routes zero-config |
+| Effort deliberately picked different from the default | Respected, untouched |
 | Model exposes no selectable efforts (or only `off`) | Untouched |
 | `thinking: disabled` deployment posture | Untouched (only `off` reported) |
 | Model metadata unresolvable | Request proceeds on route default |
+
+The listener registers at the OUTERMOST waterfall position (`prepend`), so its
+decision wins over inner listeners — including the agent's own model-selection
+listener that re-applies recorded picks after a switch.
 
 ## Install (web profile)
 
