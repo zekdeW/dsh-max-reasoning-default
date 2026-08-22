@@ -1,0 +1,15 @@
+{
+  "name": "@zekdew/dsh-max-reasoning-default",
+  "version": "1.0.0",
+  "description": "Raises every conversation request's unset reasoning effort to the highest level the selected model supports, for every provider route (pi-ai gateways, direct DeepSeek, and any future adapter implementing resolveModel).",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js"
+  ],
+  "license": "MIT"
+}
