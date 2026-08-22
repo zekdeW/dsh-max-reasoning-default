@@ -63,7 +63,7 @@ async function fetchCapabilities(modelId) {
     capabilityCache.set(modelId, result)
     return result
   } catch {
-    capabilityCache.set(modelId, result)
+    capabilityCache.set(modelId, null)
     return null
   }
 }
@@ -111,6 +111,27 @@ function persistModelMetadata(modelId, caps) {
 }
 
 /**
+ * Poll resolveModelInfo until the adapter's hot-reloaded profiles expose the
+ * freshly persisted declaration. The settings file watcher commits
+ * asynchronously, so filling an effort immediately after writing the file can
+ * race dispatch-time validation (UNSUPPORTED_REASONING_EFFORT on the very
+ * first message of a new model). Returns undefined if it does not converge in
+ * time — the caller then leaves the request untouched instead.
+ */
+async function waitForAdapterSync(ctx, provider, modelId, signal, budgetMs = 2000) {
+  const deadline = Date.now() + budgetMs
+  while (Date.now() < deadline) {
+    try {
+      const info = await ctx.llm.resolveModelInfo(provider, modelId, signal)
+      const reasoning = info.reasoning
+      if (reasoning && Array.isArray(reasoning.efforts) && reasoning.efforts.length > 0) return reasoning
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  return undefined
+}
+
+/**
  * Decide the effort one resolved call configuration should carry.
  * Pure function over leaf values; separated from the listener for testing.
  */
@@ -143,11 +164,18 @@ export default {
         if ((efforts === undefined || efforts.length === 0) && config.model.includes('/')) {
           const caps = await fetchCapabilities(config.model)
           if (caps !== null) {
-            efforts = caps.efforts
-            defaultEffort = undefined
-            // Fire-and-forget: auto-complete the settings entry so future
-            // requests AND the UI see the full metadata without restarts.
+            // Auto-complete the settings entry so future requests AND the UI
+            // see the full metadata without restarts.
             persistModelMetadata(config.model, caps)
+            // Fill from what the ADAPTER now reports, not from the catalog —
+            // dispatch validates against the adapter's profile. If it has not
+            // converged yet, send the request bare rather than letting
+            // dispatch reject an effort the stale profile cannot justify.
+            const synced = await waitForAdapterSync(ctx, config.provider, config.model, payload.signal)
+            if (synced) {
+              efforts = synced.efforts
+              defaultEffort = synced.defaultEffort
+            }
           }
         }
 
