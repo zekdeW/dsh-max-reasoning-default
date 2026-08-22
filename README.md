@@ -5,6 +5,12 @@ is unset is raised to the **highest level the selected model supports** —
 across pi-ai routes (OpenRouter etc.), the direct DeepSeek adapter, and any
 future adapter implementing the standard `resolveModel` capability seam.
 
+**v3: zero-declaration onboarding.** Add any OpenRouter model by id alone —
+on first use the plugin queries OpenRouter's public model catalog, raises the
+request to `max` immediately, and writes the full capability declaration
+(`contextWindow`, `input`, `reasoningEfforts`) back into `settings.yaml`
+asynchronously. No manual YAML editing, no restarts, no agent round-trips.
+
 ## Behavior
 
 | Situation | Result |
@@ -20,6 +26,24 @@ The listener registers at the OUTERMOST waterfall position (`prepend`), so its
 decision wins over inner listeners — including the agent's own model-selection
 listener that re-applies recorded picks after a switch.
 
+## Capability detection (three tiers)
+
+1. **Adapter-reported efforts** — declared models and installed-catalog models
+   report their levels directly; nothing extra happens.
+2. **OpenRouter catalog fallback** — a hand-declared model with no
+   `reasoningEfforts` is looked up once in OpenRouter's public
+   `/api/v1/models`; if it advertises `reasoning`, the request is filled with
+   the standard ladder (`off/low/medium/high/max`, `off → low`) and the entry
+   in `settings.yaml` is auto-completed with the catalog-exact
+   `contextWindow`, `input` modalities filtered to what the adapter actually
+   accepts (`text`/`image`), and the effort ladder.
+3. **Neither source reports capability** — left untouched (non-reasoning
+   models, disabled-thinking postures).
+
+Auto-completion only fills ABSENT fields — values you wrote by hand are never
+overwritten. The write is fire-and-forget: if it fails, the in-memory cache
+still governs this process lifetime and requests stay correct.
+
 ## Install (web profile)
 
 ```sh
@@ -33,6 +57,9 @@ git clone https://github.com/zekdeW/dsh-max-reasoning-default.git ~/dev/dsh-max-
 pnpm --dir ~/.dsh/profiles/web install
 # 4. restart the web app (or touch cordis.patch.yml — the layer hot-reloads)
 ```
+
+Runtime dependency: [`yaml`](https://www.npmjs.com/package/yaml) (for reading
+and rewriting the settings document).
 
 ## Deployment notes
 
@@ -59,3 +86,12 @@ Lessons from running this on a real deployment — recommended companion setting
   not what this plugin fills at dispatch. With no route default a model can
   show `Default` while actually requesting its top tier — display lags intent
   by design; verify behavior with a request-level probe, not the label.
+- **Hand-edited entries survive Models-page rewrites only for custom models**:
+  the web Models page owns its settings section and rewrites it wholesale on
+  save, which drops hand-added fields like `reasoningEfforts`. For models that
+  exist in the OpenRouter catalog this is harmless — one message re-triggers
+  auto-completion. For models OUTSIDE the catalog, re-add the declaration
+  after editing models through the UI.
+- **YAML comments are not preserved**: auto-completion parses and rewrites the
+  settings document with the `yaml` package, which drops comments. Keep
+  operational notes elsewhere.
