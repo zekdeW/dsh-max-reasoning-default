@@ -23,8 +23,8 @@
  * Explicit picks differing from the default are always respected.
  */
 
-import { readFileSync, writeFileSync, copyFileSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 
@@ -42,14 +42,31 @@ const AUTO_EFFORTS = [
   { id: 'max', name: 'Max' },
 ]
 
+/** Upper bound on one catalog lookup; a hung upstream must never stall the
+ * request pipeline that triggered it. */
+const CATALOG_TIMEOUT_MS = 5000
+/** Negative results are cached briefly, not forever: a transient network
+ * failure should not disable thinking control for the process lifetime. */
+const NEGATIVE_CACHE_TTL_MS = 5 * 60 * 1000
+
+/** @type {Map<string, number>} model id -> epoch ms when its null entry expires */
+const negativeCacheUntil = new Map()
+
 /**
- * Query OpenRouter's public model catalog for one model id.
- * Results cached for the process lifetime; failures cached as null.
+ * Query OpenRouter's public model catalog for one model id. Positive results
+ * cache for the process lifetime; failures and misses cache as null for a
+ * short TTL so a transient outage self-heals on a later request.
  */
-async function fetchCapabilities(modelId) {
-  if (capabilityCache.has(modelId)) return capabilityCache.get(modelId)
+async function fetchCapabilities(modelId, signal) {
+  if (capabilityCache.has(modelId)) {
+    if (capabilityCache.get(modelId) !== null) return capabilityCache.get(modelId)
+    if ((negativeCacheUntil.get(modelId) ?? 0) > Date.now()) return null
+    capabilityCache.delete(modelId)
+  }
   try {
-    const res = await fetch('https://openrouter.ai/api/v1/models')
+    const res = await fetch('https://openrouter.ai/api/v1/models', {
+      signal: signal ?? AbortSignal.timeout(CATALOG_TIMEOUT_MS),
+    })
     if (!res.ok) throw new Error(`status ${res.status}`)
     const data = await res.json()
     const match = (data.data ?? []).find(m => m.id === modelId)
@@ -64,6 +81,7 @@ async function fetchCapabilities(modelId) {
     return result
   } catch {
     capabilityCache.set(modelId, null)
+    negativeCacheUntil.set(modelId, Date.now() + NEGATIVE_CACHE_TTL_MS)
     return null
   }
 }
@@ -162,7 +180,7 @@ export default {
         let defaultEffort = info.reasoning?.defaultEffort
 
         if ((efforts === undefined || efforts.length === 0) && config.model.includes('/')) {
-          const caps = await fetchCapabilities(config.model)
+          const caps = await fetchCapabilities(config.model, payload.signal)
           if (caps !== null) {
             // Auto-complete the settings entry so future requests AND the UI
             // see the full metadata without restarts.
